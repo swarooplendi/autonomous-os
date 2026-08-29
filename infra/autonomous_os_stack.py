@@ -1,18 +1,19 @@
 """
 Autonomous OS — AWS CDK Stack
-Flask backend on Lambda + API Gateway (HTTP API)
+Flask backend on AWS Lambda + HTTP API Gateway
 React frontend on AWS Amplify
 
 Estimated monthly cost on AWS Free Tier: $0.00
-- Lambda: 1M requests/month + 400,000 GB-seconds free
+- Lambda: 1M requests/month + 400,000 GB-seconds free forever
 - API Gateway HTTP API: 1M calls/month free (12 months)
-- Amplify: 1000 build minutes + 15 GB data served free
+- AWS Amplify: 1000 build minutes + 15 GB data served free
 - CloudWatch: 10 GB log storage free
 """
 
 from __future__ import annotations
 
 import os
+import json
 import aws_cdk as cdk
 from aws_cdk import (
     Stack,
@@ -21,10 +22,9 @@ from aws_cdk import (
     aws_lambda as lambda_,
     aws_apigatewayv2 as apigw,
     aws_apigatewayv2_integrations as integrations,
-    aws_amplify_alpha as amplify,
+    aws_amplify as amplify,
     aws_iam as iam,
     aws_logs as logs,
-    aws_secretsmanager as secretsmanager,
     CfnOutput,
 )
 from constructs import Construct
@@ -35,31 +35,7 @@ class AutonomousOsStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         # ─────────────────────────────────────────────
-        # 1. Lambda Layer — Python dependencies
-        # ─────────────────────────────────────────────
-        deps_layer = lambda_.LayerVersion(
-            self,
-            "AutonomousOsDepsLayer",
-            code=lambda_.Code.from_asset(
-                "../backend",
-                bundling=cdk.BundlingOptions(
-                    image=lambda_.Runtime.PYTHON_3_12.bundling_image,
-                    command=[
-                        "bash", "-c",
-                        (
-                            "pip install -r requirements-lambda.txt "
-                            "-t /asset-output/python --no-cache-dir --quiet"
-                        ),
-                    ],
-                ),
-            ),
-            compatible_runtimes=[lambda_.Runtime.PYTHON_3_12],
-            description="Autonomous OS — Flask + Mangum + fpdf2 dependencies",
-            removal_policy=RemovalPolicy.DESTROY,
-        )
-
-        # ─────────────────────────────────────────────
-        # 2. Lambda Function — Flask app via Mangum
+        # 1. Lambda Function — Flask app via Mangum
         # ─────────────────────────────────────────────
         flask_fn = lambda_.Function(
             self,
@@ -71,9 +47,8 @@ class AutonomousOsStack(Stack):
                 "../backend",
                 exclude=["*.pyc", "__pycache__", ".env", "tmp/"],
             ),
-            layers=[deps_layer],
-            timeout=Duration.seconds(29),        # API GW max timeout
-            memory_size=256,                     # free tier: 400k GB-sec/month
+            timeout=Duration.seconds(29),
+            memory_size=256,
             environment={
                 "FLASK_ENV": "production",
                 "SECRET_KEY": self.node.try_get_context("secret_key") or "autonomous-os-prod",
@@ -84,7 +59,7 @@ class AutonomousOsStack(Stack):
         )
 
         # ─────────────────────────────────────────────
-        # 3. API Gateway HTTP API — $0 for first 12 months
+        # 2. API Gateway HTTP API ($0 for free tier)
         # ─────────────────────────────────────────────
         http_api = apigw.HttpApi(
             self,
@@ -108,7 +83,7 @@ class AutonomousOsStack(Stack):
             flask_fn,
         )
 
-        # Route all /api/* traffic to Lambda
+        # Route all /api/* to Lambda
         http_api.add_routes(
             path="/api/{proxy+}",
             methods=[apigw.HttpMethod.ANY],
@@ -116,64 +91,58 @@ class AutonomousOsStack(Stack):
         )
 
         # ─────────────────────────────────────────────
-        # 4. AWS Amplify App — React Frontend
-        #    Free tier: 1000 build-min/month, 15GB served
+        # 3. AWS Amplify App — React Frontend (Free Tier)
         # ─────────────────────────────────────────────
-        amplify_app = amplify.App(
-            self,
-            "AutonomousOsAmplify",
-            app_name="autonomous-os",
-            description="Swaroop Lendi — Autonomous OS Portfolio",
-            source_code_provider=amplify.GitHubSourceCodeProvider(
-                owner="swarooplendi",
-                repository="autonomous-os",
-                oauth_token=cdk.SecretValue.secrets_manager(
-                    "autonomous-os/github-token",
-                    json_field="token",
-                ),
-            ),
-            build_spec=amplify.BuildSpec.from_object_to_plain_text({
-                "version": "1",
-                "applications": [
-                    {
-                        "frontend": {
-                            "phases": {
-                                "preBuild": {
-                                    "commands": ["cd frontend && npm ci"]
-                                },
-                                "build": {
-                                    "commands": [
-                                        f"VITE_API_URL={http_api.url} npm run build"
-                                    ]
-                                }
-                            },
-                            "artifacts": {
-                                "baseDirectory": "frontend/dist",
-                                "files": ["**/*"]
-                            },
-                            "cache": {
-                                "paths": ["frontend/node_modules/**/*"]
-                            }
-                        }
+        build_spec = {
+            "version": "1",
+            "frontend": {
+                "phases": {
+                    "preBuild": {
+                        "commands": ["cd frontend", "npm ci"]
+                    },
+                    "build": {
+                        "commands": [
+                            f"VITE_API_URL={http_api.url} npm run build"
+                        ]
                     }
-                ]
-            }),
-            environment_variables={
-                "VITE_API_URL": http_api.url or "",
-            },
+                },
+                "artifacts": {
+                    "baseDirectory": "frontend/dist",
+                    "files": ["**/*"]
+                },
+                "cache": {
+                    "paths": ["frontend/node_modules/**/*"]
+                }
+            }
+        }
+
+        amplify_app = amplify.CfnApp(
+            self,
+            "AutonomousOsAmplifyApp",
+            name="autonomous-os",
+            description="Swaroop Lendi — Autonomous OS Portfolio",
+            repository="https://github.com/swarooplendi/autonomous-os",
+            build_spec=json.dumps(build_spec),
+            environment_variables=[
+                amplify.CfnApp.EnvironmentVariableProperty(
+                    name="VITE_API_URL",
+                    value=http_api.url or "",
+                ),
+            ],
         )
 
-        # Connect main branch → production Amplify deployment
-        main_branch = amplify_app.add_branch(
-            "main",
+        main_branch = amplify.CfnBranch(
+            self,
+            "AutonomousOsMainBranch",
+            app_id=amplify_app.attr_app_id,
             branch_name="main",
-            stage=amplify.BranchType.PRODUCTION,
-            auto_build=True,
-            description="Production deployment",
+            stage="PRODUCTION",
+            enable_auto_build=True,
+            description="Production main branch deployment",
         )
 
         # ─────────────────────────────────────────────
-        # 5. Outputs
+        # 4. Outputs
         # ─────────────────────────────────────────────
         CfnOutput(
             self,
@@ -186,14 +155,14 @@ class AutonomousOsStack(Stack):
         CfnOutput(
             self,
             "AmplifyAppId",
-            value=amplify_app.app_id,
+            value=amplify_app.attr_app_id,
             description="Amplify App ID",
         )
 
         CfnOutput(
             self,
             "AmplifyDefaultDomain",
-            value=f"https://main.{amplify_app.default_domain}",
+            value=f"https://main.{amplify_app.attr_default_domain}",
             description="Amplify Frontend URL",
             export_name="AutonomousOsFrontendUrl",
         )
