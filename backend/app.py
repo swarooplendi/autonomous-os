@@ -337,25 +337,25 @@ def download_resume():
 # WebSocket Events
 # ─────────────────────────────────────────────
 
-@socketio.on("connect")
-def on_connect():
-    now = datetime.now()
-    emit("system_status", {
-        "time": now.strftime("%H:%M:%S"),
-        "date": now.strftime("%a, %d %b %Y"),
-        "timezone": "IST",
-        "connected": True
-    })
+if socketio is not None:
+    @socketio.on("connect")
+    def on_connect():
+        now = datetime.now()
+        emit("system_status", {
+            "time": now.strftime("%H:%M:%S"),
+            "date": now.strftime("%a, %d %b %Y"),
+            "timezone": "IST",
+            "connected": True
+        })
 
-
-@socketio.on("ping_status")
-def on_ping():
-    now = datetime.now()
-    emit("system_status", {
-        "time": now.strftime("%H:%M:%S"),
-        "date": now.strftime("%a, %d %b %Y"),
-        "timezone": "IST",
-    })
+    @socketio.on("ping_status")
+    def on_ping():
+        now = datetime.now()
+        emit("system_status", {
+            "time": now.strftime("%H:%M:%S"),
+            "date": now.strftime("%a, %d %b %Y"),
+            "timezone": "IST",
+        })
 
 
 # ─────────────────────────────────────────────

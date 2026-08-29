@@ -116,12 +116,19 @@ class AutonomousOsStack(Stack):
             }
         }
 
+        github_token = (
+            self.node.try_get_context("github_token")
+            or os.environ.get("GITHUB_TOKEN")
+            or ""
+        )
+
         amplify_app = amplify.CfnApp(
             self,
             "AutonomousOsAmplifyApp",
             name="autonomous-os",
             description="Swaroop Lendi — Autonomous OS Portfolio",
             repository="https://github.com/swarooplendi/autonomous-os",
+            access_token=github_token,
             build_spec=json.dumps(build_spec),
             environment_variables=[
                 amplify.CfnApp.EnvironmentVariableProperty(
