@@ -1,6 +1,5 @@
 # ─── Autonomous OS — CI/CD GitHub Actions ───────────────────────
-# Runs on a self-hosted runner (your own machine — FREE, no GitHub minutes used)
-# Workflow: Push to main → Build React → Deploy Lambda → Amplify auto-deploys
+# Runs on your Windows self-hosted runner (FREE, zero GitHub minutes used)
 
 name: Deploy Autonomous OS
 
@@ -9,143 +8,70 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Cancel in-progress runs on new push
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   # ────────────────────────────────────────────
-  # Job 1: Lint & Type Check
+  # Job 1: Lint & Build Frontend & Backend
   # ────────────────────────────────────────────
-  lint:
-    name: Lint & Validate
-    runs-on: self-hosted          # ← Your own machine as runner (FREE)
+  lint-and-build:
+    name: Lint & Build
+    runs-on: self-hosted
+    defaults:
+      run:
+        shell: powershell
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
+      - name: Install Frontend Dependencies
         working-directory: frontend
-        run: npm ci
+        run: |
+          npm ci
 
-      - name: Build React (validate no compile errors)
+      - name: Build Frontend
         working-directory: frontend
-        run: npm run build
+        run: |
+          npm run build
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
 
-      - name: Install backend dependencies
+      - name: Install Backend Dependencies
         working-directory: backend
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
 
   # ────────────────────────────────────────────
   # Job 2: Deploy Flask to AWS Lambda via CDK
   # ────────────────────────────────────────────
   deploy-backend:
-    name: Deploy Flask → Lambda
+    name: Deploy to AWS Lambda (CDK)
     runs-on: self-hosted
-    needs: lint
-    environment: production
+    needs: lint-and-build
+    defaults:
+      run:
+        shell: powershell
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region:            ${{ secrets.AWS_REGION }}
-
-      - name: Install CDK
-        run: npm install -g aws-cdk
-
-      - name: Install CDK Python dependencies
-        working-directory: infra
-        run: pip install -r requirements.txt
-
-      - name: CDK Bootstrap (first run only — idempotent)
+      - name: Install CDK Python Dependencies
         working-directory: infra
         run: |
-          cdk bootstrap \
-            -c account=${{ secrets.AWS_ACCOUNT_ID }} \
-            -c region=${{ secrets.AWS_REGION }}
+          pip install -r requirements.txt
 
-      - name: CDK Deploy — Flask Lambda + API Gateway
+      - name: Set AWS Environment & Deploy CDK Stack
         working-directory: infra
-        run: |
-          cdk deploy AutonomousOsStack \
-            --require-approval never \
-            --outputs-file cdk-outputs.json \
-            -c account=${{ secrets.AWS_ACCOUNT_ID }} \
-            -c region=${{ secrets.AWS_REGION }} \
-            -c secret_key=${{ secrets.FLASK_SECRET_KEY }} \
-            -c frontend_url=${{ secrets.AMPLIFY_URL }}
-
-      - name: Extract API URL from CDK outputs
-        id: api_url
-        run: |
-          API_URL=$(cat infra/cdk-outputs.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(list(d.get('AutonomousOsStack',{}).values())[0] if d else '')" 2>/dev/null || echo "")
-          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
-
-      - name: Upload CDK outputs
-        uses: actions/upload-artifact@v4
-        with:
-          name: cdk-outputs
-          path: infra/cdk-outputs.json
-          retention-days: 7
-
-  # ────────────────────────────────────────────
-  # Job 3: Build React with real API URL + Trigger Amplify
-  # (Amplify auto-deploys on git push to main — this job just verifies the build)
-  # ────────────────────────────────────────────
-  verify-frontend:
-    name: Verify Frontend Build
-    runs-on: self-hosted
-    needs: deploy-backend
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build React with production API URL
-        working-directory: frontend
-        run: npm run build
         env:
-          VITE_API_URL: ${{ secrets.VITE_API_URL }}
-
-      - name: Deployment complete
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION || 'ap-south-1' }}
         run: |
-          echo "╔══════════════════════════════════════════════════════╗"
-          echo "║   Autonomous OS — Deployment Complete                ║"
-          echo "║   Flask API → AWS Lambda ✓                          ║"
-          echo "║   React → AWS Amplify (auto-deploys on push) ✓      ║"
-          echo "╚══════════════════════════════════════════════════════╝"
+          if ("${{ secrets.AWS_ACCESS_KEY_ID }}" -ne "") {
+            Write-Host "Deploying AWS CDK Stack..."
+            cdk deploy AutonomousOsStack --require-approval never --outputs-file cdk-outputs.json -c account=${{ secrets.AWS_ACCOUNT_ID }} -c region=${{ secrets.AWS_REGION || 'ap-south-1' }}
+          } else {
+            Write-Host "AWS secrets not configured yet. Skipping CDK deployment."
+          }
