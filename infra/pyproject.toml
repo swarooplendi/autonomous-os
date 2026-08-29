@@ -1,0 +1,9 @@
+[tool.poetry]
+name = "autonomous-os-infra"
+version = "0.1.0"
+description = "AWS CDK infrastructure for Autonomous OS — Swaroop Lendi Portfolio"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+aws-cdk-lib = "^2.150.0"
+constructs = "^10.3.0"

@@ -1,0 +1,49 @@
+# Git
+.git/
+*.orig
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+.env
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+*.whl
+backend/tmp/
+
+# Node.js / Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+.npm/
+
+# AWS CDK
+infra/cdk.out/
+infra/.cdk.staging/
+infra/cdk-outputs.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
