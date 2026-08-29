@@ -14,14 +14,15 @@ const Github = GitFork
 const Linkedin = Link2
 
 // ─── API Helper ───────────────────────────────────────────────
+const API_BASE = import.meta.env.VITE_API_URL || '';
 const api = {
   get: async (path) => {
-    const res = await fetch(`/api${path}`)
+    const res = await fetch(`${API_BASE}/api${path}`)
     if (!res.ok) throw new Error(`API error ${res.status}`)
     return res.json()
   },
   post: async (path, body) => {
-    const res = await fetch(`/api${path}`, {
+    const res = await fetch(`${API_BASE}/api${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
